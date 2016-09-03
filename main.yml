@@ -1,0 +1,62 @@
+---
+#2FA AUTH
+# Based on this: https://www.linux.com/blog/securing-ssh-two-factor-authentication-using-google-authenticator
+- name: Install the dependency modules
+  apt: name={{ item }} state=latest update_cache=yes
+  with_items:
+    - libpam0g-dev
+    - make
+    - gcc
+    - wget
+    - autoconf
+    - libqrencode-dev
+    - libqrencode3
+    - libtool
+
+- name: Clone the Google Authenticator module
+  git:
+   repo=git://github.com:google/google-authenticator.git
+   dest=/srv/checkout
+   clone=no
+   update=no
+
+- name: Run ./bootstrap.sh
+  command: ./bootstrap.sh
+    chdir=google-authenticator/libpam
+
+- name: Configure the libpam module
+  command: ./configure
+    chdir=google-authenticator/libpam
+
+- name: Install the new module
+  command: make && make install
+    chdir=google-authenticator/libpam
+
+# Now you can run google-authenticator
+- name: Configure google-authenticator for the first time
+  command: google-authenticator --time-based --disallow-reuse --force --qr-mode=UTF8 --rate-limit=3 --rate-time=30 --step-size=30 --window-size=3
+  register: auth_info
+
+- name: Tell pam.d that Google Authenticator is required for authentication
+  lineinfile:
+    line="auth       required     pam_google_authenticator.so"
+    state=present
+    insertafter=EOF
+    dest=/etc/pam.d/sshd
+
+- name: Tell sshd to use the ChallengeResponseAuthentication
+  lineinfile:
+    dest=/etc/ssh/sshd_config
+    line="ChallengeResponseAuthentication yes"
+    state=present
+    regexp="ChallengeResponseAuthentication no"
+
+- name: Restart the SSH service
+  service: name=ssh state=restarted
+
+- name: Get ASCII art and replace the login header with it
+  get_url:
+    url=http://artii.herokuapp.com/make?text=Secured+with+2FA&font=isometric3
+    dest=/etc/motd
+
+- debug: var=auth_info.stdout
